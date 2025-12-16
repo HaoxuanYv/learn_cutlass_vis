@@ -2,448 +2,427 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>SGEMM 1D Tiling v2.0 (Real Data)</title>
+    <title>SGEMM v3.2: Full Pipeline (Including Matrix C)</title>
     <style>
         :root {
             --bg-color: #121212;
             --panel-bg: #1e1e24;
-            --accent-a: #4facfe; /* Blue for A */
-            --accent-b: #00f2fe; /* Cyan for B */
-            --accent-c: #f093fb; /* Pink for C/Reg */
+            --accent-a: #4facfe;
+            --accent-b: #00f2fe;
+            --accent-c: #f093fb; /* Matrix C & Registers */
+            --load-highlight: #ffd700;
+            --write-highlight: #ff00ff; /* Bright Magenta for Writeback */
             --text-main: #e0e0e0;
-            --text-dim: #777;
-            --cell-size: 32px; /* Fixed cell size */
+            --cell-size: 30px; /* Slightly smaller to fit 3 grids */
         }
 
         body {
-            font-family: 'Consolas', 'Monaco', monospace; /* Monospace for numbers */
+            font-family: 'Consolas', 'Monaco', monospace;
             background-color: var(--bg-color);
             color: var(--text-main);
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 20px;
+            padding: 10px;
             margin: 0;
+            user-select: none;
         }
 
-        /* --- Controls --- */
+        /* --- Layout & Panels --- */
         .controls {
             background: var(--panel-bg);
-            padding: 15px 25px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
             display: flex;
             gap: 15px;
             align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         }
+
         button {
-            padding: 8px 16px;
+            padding: 6px 12px;
             background: #333;
             border: 1px solid #555;
             color: white;
-            border-radius: 6px;
+            border-radius: 4px;
             cursor: pointer;
-            transition: all 0.2s;
-            font-family: inherit;
         }
         button:hover:not(:disabled) { background: var(--accent-a); border-color: var(--accent-a); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button:disabled { opacity: 0.3; cursor: not-allowed; }
 
-        /* --- Layout --- */
         .main-container {
             display: flex;
-            gap: 40px;
-            align-items: flex-start;
-            flex-wrap: wrap;
+            gap: 20px;
             justify-content: center;
+            flex-wrap: wrap;
+            max-width: 1200px;
         }
 
         .panel {
             background: var(--panel-bg);
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
-        h3 { margin: 0 0 15px 0; font-size: 16px; color: var(--text-dim); text-align: center; text-transform: uppercase; letter-spacing: 1px; }
+        h3 { margin: 0 0 10px 0; font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 1px;}
 
         /* --- Grids --- */
-        .grid {
-            display: grid;
-            gap: 2px;
-            /* Use generic grid styles, specific cols set by JS */
+        .grid-wrapper { display: flex; gap: 15px; }
+        
+        .grid-col {
+            display: flex; flex-direction: column; align-items: center;
         }
+        .grid-label { font-size: 10px; margin-bottom: 4px; color: #777; font-weight: bold; }
+
+        .grid { display: grid; gap: 2px; }
 
         .cell {
             width: var(--cell-size);
             height: var(--cell-size);
             background: #2a2a30;
-            border-radius: 4px;
+            border-radius: 3px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 10px;
             color: #555;
-            transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
-            cursor: default;
+            position: relative;
+            transition: transform 0.1s, background 0.1s;
         }
 
-        /* --- States --- */
+        /* Thread Badge */
+        .badge {
+            position: absolute; top: -5px; right: -5px;
+            font-size: 8px; background: #444; color: white;
+            padding: 1px 3px; border-radius: 3px; display: none; z-index: 20;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        }
+
+        /* --- Colors & States --- */
         .cell.val-a { border: 1px solid #2d4a66; color: #6a9acb; }
         .cell.val-b { border: 1px solid #2d6666; color: #6acbcb; }
         .cell.val-c { border: 1px solid #662d66; color: #cb6acb; }
 
-        /* Highlights */
-        .cell.active-a { background: var(--accent-a); color: #000; font-weight: bold; transform: scale(1.1); z-index: 10; box-shadow: 0 0 8px var(--accent-a); }
-        .cell.active-b { background: var(--accent-b); color: #000; font-weight: bold; transform: scale(1.1); z-index: 10; box-shadow: 0 0 8px var(--accent-b); }
-        .cell.active-c { background: var(--accent-c); color: #000; font-weight: bold; transform: scale(1.15); z-index: 10; box-shadow: 0 0 10px var(--accent-c); }
-
-        /* --- Register View --- */
-        .reg-container {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-top: 15px;
-            background: #111;
-            padding: 10px;
-            border-radius: 8px;
-            border-left: 3px solid var(--accent-c);
+        /* Animation States */
+        .cell.loading {
+            background: var(--load-highlight); color: #000; font-weight: bold;
+            transform: scale(1.15); z-index: 10; border: 1px solid #fff;
+            box-shadow: 0 0 10px var(--load-highlight);
         }
-        .reg-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 13px;
+        .cell.compute-src { 
+            border: 2px solid #fff; background-color: #444; color: #fff; z-index: 5; 
         }
-        .reg-val {
-            font-weight: bold;
-            color: var(--accent-c);
-            font-size: 15px;
+        .cell.compute-active { 
+            background: #fff; color: #000; font-weight: bold; transform: scale(1.1);
+        }
+        .cell.write-dest {
+            background: var(--write-highlight); color: #fff; font-weight: bold;
+            transform: scale(1.2); z-index: 15; box-shadow: 0 0 15px var(--write-highlight);
+            border: 1px solid #fff;
         }
 
-        /* --- Calculation Log --- */
-        #calc-display {
-            min-height: 40px;
-            margin-top: 20px;
-            padding: 10px;
-            background: #333;
-            border-radius: 6px;
-            color: #fff;
-            text-align: center;
-            font-size: 14px;
-            border: 1px solid #444;
+        /* --- Registers --- */
+        .reg-box {
+            margin-top: 15px; padding-top: 10px; border-top: 1px solid #333; width: 100%;
         }
-        .math-highlight { color: #f1c40f; font-weight: bold; }
+        .reg-row { display: flex; justify-content: center; gap: 15px; font-size: 11px; }
+        .reg-val { font-weight: bold; color: var(--accent-c); font-size: 13px;}
 
+        /* --- Info Box --- */
+        .info-box {
+            margin-top: 20px; padding: 10px; background: #1a1a1a;
+            border-left: 4px solid var(--accent-c);
+            width: 100%; max-width: 700px;
+            font-size: 13px; line-height: 1.5;
+        }
+        .param-tag { background: #333; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #aaa; }
     </style>
 </head>
 <body>
 
     <div class="controls">
-        <div style="margin-right:20px">
-            <strong>SGEMM 1D Tiling</strong> <span style="color:#777; font-size:0.9em">(TM=2)</span>
+        <div>
+            <strong>SGEMM v3.2</strong> 
+            <span class="param-tag">BM=4</span> <span class="param-tag">TM=2</span>
+            <span class="param-tag">Threads=8</span>
         </div>
         <button onclick="prevStep()" id="btnPrev">Prev</button>
         <button onclick="nextStep()" id="btnNext">Next</button>
         <button onclick="resetSim()">Reset</button>
-        <div style="margin-left:auto; font-size:14px; color:#888">
-            Step: <span id="stepDisp" style="color:white">0</span>
+        <div style="font-size:12px; color:#888; width: 60px; text-align:right;">
+            <span id="stepDisp">0</span>
         </div>
     </div>
 
     <div class="main-container">
         
         <div class="panel">
-            <h3>Global Memory (A & B)</h3>
-            <div style="display: flex; gap: 20px;">
-                <div>
-                    <div style="text-align:center; font-size:10px; margin-bottom:5px; color:var(--accent-a)">Matrix A (8x8)</div>
+            <h3>Global Memory</h3>
+            <div class="grid-wrapper">
+                <div class="grid-col">
+                    <div class="grid-label" style="color:var(--accent-a)">Matrix A (8x8)</div>
                     <div id="gridA" class="grid" style="grid-template-columns: repeat(8, var(--cell-size));"></div>
                 </div>
-                <div>
-                    <div style="text-align:center; font-size:10px; margin-bottom:5px; color:var(--accent-b)">Matrix B (8x8)</div>
+                <div class="grid-col">
+                    <div class="grid-label" style="color:var(--accent-b)">Matrix B (8x8)</div>
                     <div id="gridB" class="grid" style="grid-template-columns: repeat(8, var(--cell-size));"></div>
                 </div>
-            </div>
-            
-            <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
-                <div style="text-align:center; font-size:10px; margin-bottom:5px; color:var(--accent-c)">Global C (Block Result 4x4)</div>
-                <div style="display:flex; justify-content:center;">
-                    <div id="gridC" class="grid" style="grid-template-columns: repeat(4, var(--cell-size));"></div>
+                <div class="grid-col">
+                    <div class="grid-label" style="color:var(--accent-c)">Matrix C (8x8)</div>
+                    <div id="gridC" class="grid" style="grid-template-columns: repeat(8, var(--cell-size));"></div>
                 </div>
             </div>
         </div>
 
-        <div class="panel" style="min-width: 300px;">
-            <h3>Block(0,0) Context</h3>
-            
-            <div style="display:flex; gap:15px; justify-content:center; align-items:flex-end;">
-                <div>
-                    <div style="text-align:center; font-size:10px; margin-bottom:2px; color:#aaa">Smem A (4x4)</div>
+        <div class="panel">
+            <h3>Block(0,0) - Shared Mem</h3>
+            <div class="grid-wrapper">
+                <div class="grid-col">
+                    <div class="grid-label">Tile A (4x4)</div>
                     <div id="smemA" class="grid" style="grid-template-columns: repeat(4, var(--cell-size));"></div>
                 </div>
-                <div>
-                    <div style="text-align:center; font-size:10px; margin-bottom:2px; color:#aaa">Smem B (4x4)</div>
+                <div class="grid-col">
+                    <div class="grid-label">Tile B (4x4)</div>
                     <div id="smemB" class="grid" style="grid-template-columns: repeat(4, var(--cell-size));"></div>
                 </div>
             </div>
 
-            <div style="margin-top: 25px;">
-                <h3>Thread 0 Registers (TM=2)</h3>
-                <div style="font-size:12px; color:#888; margin-bottom:5px;">Processing C[0][0] and C[1][0]</div>
-                
-                <div class="reg-container">
-                    <div class="reg-row">
-                        <span>Reg[0] (Row 0):</span>
-                        <span id="reg0_val" class="reg-val">0.0</span>
-                    </div>
-                    <div class="reg-row">
-                        <span>Reg[1] (Row 1):</span>
-                        <span id="reg1_val" class="reg-val">0.0</span>
-                    </div>
+            <div class="reg-box">
+                <div class="grid-label" style="text-align:center; margin-bottom:5px;">Thread 0 Registers</div>
+                <div class="reg-row">
+                    <div>Reg[0] <span class="reg-val" id="reg0">0</span></div>
+                    <div>Reg[1] <span class="reg-val" id="reg1">0</span></div>
                 </div>
-
-                <div id="calc-display">Ready to start...</div>
             </div>
         </div>
+
+    </div>
+
+    <div class="info-box" id="infoText">
+        Ready.
     </div>
 
 <script>
     // --- Config ---
     const BM = 4, BN = 4, BK = 4, TM = 2;
-    const GLOBAL_K = 8;
+    const NumThreads = (BM * BN) / TM; // 8 threads
+    const SmemSize = BM * BK; 
+    const GlobalK = 8;
+    const GlobalSize = 64; // 8x8
     
     // --- State ---
+    let matA = [], matB = [], matC = [];
     let steps = [];
     let currentStep = 0;
     
-    // Data Simulation
-    const matA = []; // 8x8 flat
-    const matB = []; // 8x8 flat
-    const matC = new Array(BM*BN).fill(0); // Result buffer for display
-    
-    // Thread 0 specific accumulator tracking
-    let t0_reg = [0, 0]; 
-
-    // --- Initialization ---
-    function initData() {
-        // Fill A and B with random small ints (1-5) for easy mental math
-        for(let i=0; i<64; i++) matA[i] = Math.ceil(Math.random() * 5);
-        for(let i=0; i<64; i++) matB[i] = Math.ceil(Math.random() * 5);
-        t0_reg = [0, 0];
-    }
-
-    function createGrid(id, count, dataArray, className) {
-        const el = document.getElementById(id);
-        el.innerHTML = '';
-        for(let i=0; i<count; i++) {
-            const div = document.createElement('div');
-            div.className = `cell ${className}`;
-            div.id = `${id}_${i}`;
-            // If it's Global A or B, show initial data
-            if(dataArray && dataArray[i] !== undefined) {
-                div.textContent = dataArray[i];
-            } else {
-                div.textContent = '-';
-            }
-            el.appendChild(div);
-        }
-    }
-
-    function renderBase() {
-        createGrid('gridA', 64, matA, 'val-a');
-        createGrid('gridB', 64, matB, 'val-b');
-        createGrid('gridC', 16, null, 'val-c'); // Block C is 4x4
-        createGrid('smemA', 16, null, 'val-a'); // 4x4
-        createGrid('smemB', 16, null, 'val-b'); // 4x4
+    // --- Init ---
+    function init() {
+        // Random Data 1-5 for easier math visuals
+        for(let i=0; i<GlobalSize; i++) matA[i] = Math.ceil(Math.random()*5);
+        for(let i=0; i<GlobalSize; i++) matB[i] = Math.ceil(Math.random()*5);
+        // Init C to 0
+        matC = new Array(GlobalSize).fill(0);
         
-        document.getElementById('reg0_val').textContent = "0.0";
-        document.getElementById('reg1_val').textContent = "0.0";
-        document.getElementById('calc-display').textContent = "Click Next to start";
-    }
-
-    // --- Step Generation Logic ---
-    function generateSteps() {
-        steps = [];
+        createGrid('gridA', GlobalSize, matA, 'val-a');
+        createGrid('gridB', GlobalSize, matB, 'val-b');
+        createGrid('gridC', GlobalSize, matC, 'val-c');
+        createGrid('smemA', 16, null, 'val-a');
+        createGrid('smemB', 16, null, 'val-b');
         
-        // Simulating the kernel execution flow
-        let threadRegs = [0, 0]; // Simulation for Thread 0
-
-        for (let tileIdx = 0; tileIdx < GLOBAL_K; tileIdx += BK) {
-            
-            // 1. Load Phase
-            steps.push({
-                type: 'load',
-                tileIdx: tileIdx,
-                msg: `Load Tile K=[${tileIdx}..${tileIdx+3}] from Global to Shared`
-            });
-
-            // 2. Compute Phase (Iterate over K inside tile)
-            for (let dotIdx = 0; dotIdx < BK; dotIdx++) {
-                
-                // We focus on Thread 0 (Row=0, Col=0)
-                // Thread 0 computes C[0][0] and C[1][0] (because TM=2)
-                
-                // The relevant values in Shared Mem for this dot step:
-                // B value: smemB[dotIdx][0] (Used by both TM steps)
-                // A val 0: smemA[0][dotIdx]
-                // A val 1: smemA[1][dotIdx]
-
-                // Mapping Global Coords to find actual data values for the visualizer
-                // Global B: Row = tileIdx + dotIdx, Col = 0
-                // Global A0: Row = 0, Col = tileIdx + dotIdx
-                // Global A1: Row = 1, Col = tileIdx + dotIdx
-                
-                const globalA_idx_0 = (0) * 8 + (tileIdx + dotIdx);
-                const globalA_idx_1 = (1) * 8 + (tileIdx + dotIdx);
-                const globalB_idx   = (tileIdx + dotIdx) * 8 + (0); // Thread col 0
-
-                const valA0 = matA[globalA_idx_0];
-                const valA1 = matA[globalA_idx_1];
-                const valB  = matB[globalB_idx];
-
-                // Step: Compute TM 0
-                threadRegs[0] += valA0 * valB;
-                steps.push({
-                    type: 'compute',
-                    tm: 0,
-                    dotIdx: dotIdx,
-                    valA: valA0,
-                    valB: valB,
-                    currentSum: threadRegs[0],
-                    smemA_idx: 0 * 4 + dotIdx,     // Row 0, Col dotIdx in Smem
-                    smemB_idx: dotIdx * 4 + 0,     // Row dotIdx, Col 0 in Smem
-                    msg: `Reg[0] += ${valA0} * ${valB}`
-                });
-
-                // Step: Compute TM 1
-                threadRegs[1] += valA1 * valB;
-                steps.push({
-                    type: 'compute',
-                    tm: 1,
-                    dotIdx: dotIdx,
-                    valA: valA1,
-                    valB: valB,
-                    currentSum: threadRegs[1],
-                    smemA_idx: 1 * 4 + dotIdx,     // Row 1, Col dotIdx in Smem
-                    smemB_idx: dotIdx * 4 + 0,     // Re-use same B
-                    msg: `Reg[1] += ${valA1} * ${valB}`
-                });
-            }
-        }
-
-        // 3. Writeback
-        steps.push({
-            type: 'write',
-            finalRegs: [...threadRegs],
-            msg: "Write Registers to Global C"
-        });
-    }
-
-    // --- View Updates ---
-    function updateView() {
-        // Reset Visuals
-        document.querySelectorAll('.cell').forEach(e => {
-            e.className = e.className.replace('active-a','').replace('active-b','').replace('active-c','');
-        });
+        document.getElementById('reg0').textContent = '0';
+        document.getElementById('reg1').textContent = '0';
         
-        const step = steps[currentStep];
-        document.getElementById('stepDisp').textContent = `${currentStep+1}/${steps.length}`;
-        document.getElementById('calc-display').innerHTML = step.msg;
-
-        // Logic based on step type
-        if(step.type === 'load') {
-            // Visualize loading into Smem (Copying data)
-            const tileStart = step.tileIdx;
-            
-            // Fill Smem Visuals with actual data
-            for(let r=0; r<BM; r++) {
-                for(let c=0; c<BK; c++) {
-                    const globalVal = matA[r*8 + (tileStart+c)];
-                    const smemEl = document.getElementById(`smemA_${r*4+c}`);
-                    smemEl.textContent = globalVal;
-                    // Highlight source in Global
-                    document.getElementById(`gridA_${r*8+(tileStart+c)}`).classList.add('active-a');
-                }
-            }
-            for(let r=0; r<BK; r++) {
-                for(let c=0; c<BN; c++) {
-                    const globalVal = matB[(tileStart+r)*8 + c];
-                    const smemEl = document.getElementById(`smemB_${r*4+c}`);
-                    smemEl.textContent = globalVal;
-                    // Highlight source in Global
-                    document.getElementById(`gridB_${(tileStart+r)*8+c}`).classList.add('active-b');
-                }
-            }
-        } 
-        else if (step.type === 'compute') {
-            // Highlight Smem Cells
-            document.getElementById(`smemA_${step.smemA_idx}`).classList.add('active-a');
-            document.getElementById(`smemB_${step.smemB_idx}`).classList.add('active-b');
-
-            // Detailed Math display
-            const mathHTML = `
-                <span style="color:#888">Calculation:</span><br>
-                ${step.valA} <span style="font-size:0.8em">x</span> ${step.valB} = ${step.valA*step.valB}
-                <br>
-                Accum => <span class="math-highlight">${step.currentSum}</span>
-            `;
-            document.getElementById('calc-display').innerHTML = mathHTML;
-
-            // Update Register DOM
-            const regId = step.tm === 0 ? 'reg0_val' : 'reg1_val';
-            const regEl = document.getElementById(regId);
-            regEl.textContent = step.currentSum;
-            regEl.style.color = '#f1c40f'; // Flash yellow
-            setTimeout(() => regEl.style.color = 'var(--accent-c)', 300);
-        }
-        else if (step.type === 'write') {
-            // Highlight C
-            const c0 = document.getElementById('gridC_0'); // Row 0, Col 0
-            const c1 = document.getElementById('gridC_4'); // Row 1, Col 0 (Index = 1*4 + 0 = 4)
-            
-            c0.textContent = step.finalRegs[0];
-            c1.textContent = step.finalRegs[1];
-            
-            c0.classList.add('active-c');
-            c1.classList.add('active-c');
-        }
-
-        // Button states
-        document.getElementById('btnPrev').disabled = currentStep === 0;
-        document.getElementById('btnNext').disabled = currentStep === steps.length - 1;
-    }
-
-    function nextStep() {
-        if(currentStep < steps.length-1) {
-            currentStep++;
-            updateView();
-        }
-    }
-
-    function prevStep() {
-        if(currentStep > 0) {
-            currentStep--;
-            updateView();
-        }
-    }
-
-    function resetSim() {
-        currentStep = 0;
-        initData();
-        renderBase();
         generateSteps();
         updateView();
     }
 
-    // Start
-    initData();
-    renderBase();
-    generateSteps();
-    // Don't auto-run updateView on load so "Reset" state is cleaner, 
-    // but here we want to show initial text.
-    document.getElementById('calc-display').textContent = "Ready. Data Randomized. Click Next.";
+    function createGrid(id, count, data, cls) {
+        const el = document.getElementById(id);
+        el.innerHTML = '';
+        for(let i=0; i<count; i++) {
+            const d = document.createElement('div');
+            d.className = `cell ${cls}`;
+            d.id = `${id}_${i}`;
+            if(data) d.textContent = data[i];
+            else d.textContent = '-';
+            
+            const b = document.createElement('div');
+            b.className = 'badge';
+            b.id = `${id}_${i}_badge`;
+            d.appendChild(b);
+            el.appendChild(d);
+        }
+    }
+
+    // --- Logic ---
+    function generateSteps() {
+        steps = [];
+        let t0_accum = [0, 0];
+        
+        // Snapshots for persistence
+        let currentSmemA = new Array(16).fill('-');
+        let currentSmemB = new Array(16).fill('-');
+        let currentMatC = [...matC]; // Snapshot of Global C
+
+        // Initial
+        steps.push({
+            type: 'init',
+            smemA: [...currentSmemA],
+            smemB: [...currentSmemB],
+            matC: [...currentMatC],
+            accum: [...t0_accum],
+            text: "Initial State. Global C initialized to 0."
+        });
+
+        for (let tileIdx = 0; tileIdx < GlobalK; tileIdx += BK) {
+            
+            // --- LOAD PHASE ---
+            // Load A
+            for (let offset = 0; offset < SmemSize; offset += NumThreads) {
+                let loadMap = [];
+                for(let tid=0; tid<NumThreads; tid++) {
+                    let smemIdx = offset + tid;
+                    if(smemIdx < SmemSize) {
+                        let r = Math.floor(smemIdx / BK);
+                        let c = smemIdx % BK;
+                        let gIdx = (0 * BM + r) * 8 + (tileIdx + c); // Block 0 offset
+                        loadMap.push({ tid, smemIdx, gIdx });
+                        currentSmemA[smemIdx] = matA[gIdx];
+                    }
+                }
+                steps.push({
+                    type: 'load', target: 'A', iter: offset/NumThreads, map: loadMap,
+                    smemA: [...currentSmemA], smemB: [...currentSmemB], matC: [...currentMatC], accum: [...t0_accum],
+                    text: `<b>Load Tile A (Stride ${offset/NumThreads}):</b> Threads loading Global A -> Shared A.`
+                });
+            }
+            // Load B
+            for (let offset = 0; offset < SmemSize; offset += NumThreads) {
+                let loadMap = [];
+                for(let tid=0; tid<NumThreads; tid++) {
+                    let smemIdx = offset + tid;
+                    if(smemIdx < SmemSize) {
+                        let r = Math.floor(smemIdx / BN);
+                        let c = smemIdx % BN;
+                        let gIdx = (tileIdx + r) * 8 + (0 * BN + c);
+                        loadMap.push({ tid, smemIdx, gIdx });
+                        currentSmemB[smemIdx] = matB[gIdx];
+                    }
+                }
+                steps.push({
+                    type: 'load', target: 'B', iter: offset/NumThreads, map: loadMap,
+                    smemA: [...currentSmemA], smemB: [...currentSmemB], matC: [...currentMatC], accum: [...t0_accum],
+                    text: `<b>Load Tile B (Stride ${offset/NumThreads}):</b> Threads loading Global B -> Shared B.`
+                });
+            }
+
+            steps.push({ 
+                type: 'sync', smemA: [...currentSmemA], smemB: [...currentSmemB], matC: [...currentMatC], accum: [...t0_accum],
+                text: "<b>__syncthreads()</b>: Data loaded." 
+            });
+
+            // --- COMPUTE PHASE ---
+            for (let k = 0; k < BK; k++) {
+                let bIdx = k * 4 + 0;
+                let aIdx0 = 0 * 4 + k;
+                let aIdx1 = 1 * 4 + k;
+                
+                let valB = currentSmemB[bIdx];
+                let valA0 = currentSmemA[aIdx0];
+                let valA1 = currentSmemA[aIdx1];
+                
+                t0_accum[0] += valA0 * valB;
+                t0_accum[1] += valA1 * valB;
+
+                steps.push({
+                    type: 'compute', k: k, indices: { a0: aIdx0, a1: aIdx1, b: bIdx },
+                    smemA: [...currentSmemA], smemB: [...currentSmemB], matC: [...currentMatC], accum: [...t0_accum],
+                    text: `<b>Compute (k=${k}):</b> Accumulating results in Registers.`
+                });
+            }
+        }
+
+        // --- WRITE BACK PHASE ---
+        // Thread 0 writes to Global C (Row 0, Col 0) AND (Row 1, Col 0)
+        // Global width = 8
+        let cIdx0 = 0 * 8 + 0; 
+        let cIdx1 = 1 * 8 + 0;
+        
+        currentMatC[cIdx0] = t0_accum[0];
+        currentMatC[cIdx1] = t0_accum[1];
+
+        steps.push({
+            type: 'write',
+            writeIndices: [cIdx0, cIdx1],
+            smemA: [...currentSmemA], smemB: [...currentSmemB], 
+            matC: [...currentMatC], // Final C State
+            accum: [...t0_accum],
+            text: "<b>Write Back:</b> Thread 0 writes Reg[0] and Reg[1] to Global Matrix C."
+        });
+
+        steps.push({
+            type: 'finish',
+            smemA: [...currentSmemA], smemB: [...currentSmemB], matC: [...currentMatC], accum: [...t0_accum],
+            text: "<b>Done:</b> Kernel execution complete for this block."
+        });
+    }
+
+    function updateView() {
+        // Reset Visuals
+        document.querySelectorAll('.cell').forEach(c => {
+            c.className = c.className.replace('loading', '').replace('compute-src', '').replace('compute-active', '').replace('write-dest', '');
+        });
+        document.querySelectorAll('.badge').forEach(b => b.style.display = 'none');
+
+        const s = steps[currentStep];
+        document.getElementById('stepDisp').textContent = `${currentStep}/${steps.length-1}`;
+        document.getElementById('infoText').innerHTML = s.text;
+        
+        // Restore Registers
+        document.getElementById('reg0').textContent = s.accum[0];
+        document.getElementById('reg1').textContent = s.accum[1];
+
+        // RESTORE ALL MEMORY GRIDS (Persistence)
+        if(s.smemA) s.smemA.forEach((val, i) => document.getElementById(`smemA_${i}`).textContent = val);
+        if(s.smemB) s.smemB.forEach((val, i) => document.getElementById(`smemB_${i}`).textContent = val);
+        if(s.matC)  s.matC.forEach((val, i) => document.getElementById(`gridC_${i}`).textContent = val); // Restore Global C
+
+        // Animations
+        if(s.type === 'load') {
+            s.map.forEach(item => {
+                document.getElementById(`grid${s.target}_${item.gIdx}`).classList.add('compute-src');
+                document.getElementById(`smem${s.target}_${item.smemIdx}`).classList.add('loading');
+                const badge = document.getElementById(`smem${s.target}_${item.smemIdx}_badge`);
+                badge.textContent = `T${item.tid}`; badge.style.display = 'block';
+            });
+        }
+        else if(s.type === 'compute') {
+            document.getElementById(`smemA_${s.indices.a0}`).classList.add('compute-src');
+            document.getElementById(`smemA_${s.indices.a1}`).classList.add('compute-src');
+            document.getElementById(`smemB_${s.indices.b}`).classList.add('compute-active');
+        }
+        else if(s.type === 'write') {
+            // Highlight Global C destinations
+            s.writeIndices.forEach(idx => {
+                const cel = document.getElementById(`gridC_${idx}`);
+                cel.classList.add('write-dest');
+            });
+        }
+
+        document.getElementById('btnPrev').disabled = currentStep === 0;
+        document.getElementById('btnNext').disabled = currentStep === steps.length - 1;
+    }
+
+    function nextStep() { if(currentStep < steps.length-1) { currentStep++; updateView(); }}
+    function prevStep() { if(currentStep > 0) { currentStep--; updateView(); }}
+    function resetSim() { currentStep=0; init(); }
+
+    init();
 
 </script>
 </body>
