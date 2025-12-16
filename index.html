@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CUDA 学习可视化演示集</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.6; background: #f0f2f5; }
+        h1 { text-align: center; color: #333; }
+        .card-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 30px; }
+        
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+            text-decoration: none;
+            color: inherit;
+            border: 1px solid #ddd;
+        }
+        
+        .card:hover { transform: translateY(-5px); box-shadow: 0 8px 12px rgba(0,0,0,0.15); border-color: #4a90e2; }
+        .card h3 { margin-top: 0; color: #4a90e2; }
+        .card p { color: #666; font-size: 0.9em; }
+        .tag { display: inline-block; background: #eee; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; margin-top: 10px; color: #555;}
+    </style>
+</head>
+<body>
+
+    <h1>🚀 CUDA Kernel 可视化合集</h1>
+    <p style="text-align: center; color: #666;">点击下方卡片查看不同的 Kernel 运行原理演示</p>
+
+    <div class="card-container">
+        
+        <a href="gemm_1d.html" class="card">
+            <h3>SGEMM: 1D Block Tiling</h3>
+            <p>演示单精度矩阵乘法中的 1D Thread Tiling 技术，包含 Global Memory 到 Shared Memory 的搬运及计算过程。</p>
+            <span class="tag">BM=4</span> <span class="tag">TM=2</span>
+        </a>
+
+        <a href="gemm_2d.html" class="card">
+            <h3>SGEMM: 2D Block Tiling</h3>
+            <p>这里演示 2D Tiling (Coming Soon)... 你需要上传对应的 html 文件。</p>
+            <span class="tag">Advanced</span>
+        </a>
+
+        <a href="#" class="card" style="opacity: 0.6; cursor: default;">
+            <h3>Warp Divergence (待上传)</h3>
+            <p>演示线程束分化带来的性能影响。</p>
+        </a>
+
+    </div>
+
+</body>
+</html>
