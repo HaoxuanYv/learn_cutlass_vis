@@ -2,24 +2,23 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SGEMM 1D Block Tiling Visualization</title>
+    <title>SGEMM 1D Tiling v2.0 (Real Data)</title>
     <style>
         :root {
-            --bg-color: #1e1e24;
-            --matrix-a-color: #4a90e2;
-            --matrix-b-color: #50e3c2;
-            --matrix-c-color: #bd10e0;
-            --highlight-color: #f5a623;
-            --thread-color: #ffffff;
-            --text-color: #e0e0e0;
-            --dim-color: #444;
+            --bg-color: #121212;
+            --panel-bg: #1e1e24;
+            --accent-a: #4facfe; /* Blue for A */
+            --accent-b: #00f2fe; /* Cyan for B */
+            --accent-c: #f093fb; /* Pink for C/Reg */
+            --text-main: #e0e0e0;
+            --text-dim: #777;
+            --cell-size: 32px; /* Fixed cell size */
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Consolas', 'Monaco', monospace; /* Monospace for numbers */
             background-color: var(--bg-color);
-            color: var(--text-color);
+            color: var(--text-main);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -27,418 +26,424 @@
             margin: 0;
         }
 
-        h2 { margin-bottom: 10px; }
-        
+        /* --- Controls --- */
         .controls {
+            background: var(--panel-bg);
+            padding: 15px 25px;
+            border-radius: 12px;
             margin-bottom: 20px;
-            background: #2c2c35;
-            padding: 15px;
-            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
             display: flex;
             gap: 15px;
             align-items: center;
         }
-
         button {
             padding: 8px 16px;
-            background: var(--matrix-a-color);
-            border: none;
+            background: #333;
+            border: 1px solid #555;
             color: white;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            font-family: inherit;
         }
+        button:hover:not(:disabled) { background: var(--accent-a); border-color: var(--accent-a); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-        button:hover { background: #357abd; }
-        button:disabled { background: #555; cursor: not-allowed; }
-
-        .layout-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-gap: 40px;
-            max-width: 1200px;
+        /* --- Layout --- */
+        .main-container {
+            display: flex;
+            gap: 40px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            justify-content: center;
         }
 
         .panel {
-            background: #2c2c35;
-            padding: 15px;
-            border-radius: 8px;
-            position: relative;
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
 
-        .matrix-title {
-            text-align: center;
-            font-weight: bold;
-            margin-bottom: 10px;
-            color: #aaa;
-        }
+        h3 { margin: 0 0 15px 0; font-size: 16px; color: var(--text-dim); text-align: center; text-transform: uppercase; letter-spacing: 1px; }
 
-        /* Grids */
-        .grid-container {
+        /* --- Grids --- */
+        .grid {
             display: grid;
             gap: 2px;
-            margin: 0 auto;
+            /* Use generic grid styles, specific cols set by JS */
         }
 
         .cell {
-            width: 30px;
-            height: 30px;
-            background: #333;
-            border-radius: 2px;
+            width: var(--cell-size);
+            height: var(--cell-size);
+            background: #2a2a30;
+            border-radius: 4px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 10px;
-            color: #777;
-            position: relative;
-            transition: all 0.3s ease;
+            font-size: 12px;
+            color: #555;
+            transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+            cursor: default;
         }
 
-        /* Specific Matrix Styles */
-        .cell.a-mem { border: 1px solid #334; }
-        .cell.b-mem { border: 1px solid #343; }
-        .cell.c-mem { border: 1px solid #434; }
+        /* --- States --- */
+        .cell.val-a { border: 1px solid #2d4a66; color: #6a9acb; }
+        .cell.val-b { border: 1px solid #2d6666; color: #6acbcb; }
+        .cell.val-c { border: 1px solid #662d66; color: #cb6acb; }
 
         /* Highlights */
-        .cell.active-load-a { background: var(--matrix-a-color); color: white; transform: scale(1.1); z-index: 2; box-shadow: 0 0 10px var(--matrix-a-color); }
-        .cell.active-load-b { background: var(--matrix-b-color); color: #000; transform: scale(1.1); z-index: 2; box-shadow: 0 0 10px var(--matrix-b-color); }
-        
-        .cell.smem-a { border: 1px solid var(--matrix-a-color); color: var(--matrix-a-color); }
-        .cell.smem-b { border: 1px solid var(--matrix-b-color); color: var(--matrix-b-color); }
+        .cell.active-a { background: var(--accent-a); color: #000; font-weight: bold; transform: scale(1.1); z-index: 10; box-shadow: 0 0 8px var(--accent-a); }
+        .cell.active-b { background: var(--accent-b); color: #000; font-weight: bold; transform: scale(1.1); z-index: 10; box-shadow: 0 0 8px var(--accent-b); }
+        .cell.active-c { background: var(--accent-c); color: #000; font-weight: bold; transform: scale(1.15); z-index: 10; box-shadow: 0 0 10px var(--accent-c); }
 
-        .cell.highlight-compute-a { background: var(--matrix-a-color); color: white; }
-        .cell.highlight-compute-b { background: var(--matrix-b-color); color: #000; }
-        
-        /* Thread Work */
-        .cell.thread-result { 
-            border: 2px solid var(--highlight-color); 
-            background: rgba(245, 166, 35, 0.2);
-        }
-        
-        .cell.thread-active {
-            background: var(--highlight-color);
-            color: #000;
-            font-weight: bold;
-        }
-
-        .info-box {
-            grid-column: 1 / -1;
-            background: #333;
-            padding: 10px;
-            border-left: 4px solid var(--highlight-color);
-            font-family: monospace;
-            min-height: 60px;
-        }
-
-        .legend {
+        /* --- Register View --- */
+        .reg-container {
             display: flex;
-            gap: 15px;
-            font-size: 12px;
-            margin-top: 10px;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+            background: #111;
+            padding: 10px;
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-c);
         }
-        .dot { width: 10px; height: 10px; display: inline-block; margin-right: 5px; }
+        .reg-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+        .reg-val {
+            font-weight: bold;
+            color: var(--accent-c);
+            font-size: 15px;
+        }
 
-        /* Connections/Arrows (Simplified as CSS lines) */
-        .arrow-label {
-            position: absolute;
-            font-size: 10px;
-            color: #888;
+        /* --- Calculation Log --- */
+        #calc-display {
+            min-height: 40px;
+            margin-top: 20px;
+            padding: 10px;
+            background: #333;
+            border-radius: 6px;
+            color: #fff;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #444;
         }
+        .math-highlight { color: #f1c40f; font-weight: bold; }
 
     </style>
 </head>
 <body>
 
-    <h2>SGEMM: 1D Block Tiling (TM=2) Visualization</h2>
-    
     <div class="controls">
-        <div>
-            <strong>Params:</strong> BM=4, BN=4, BK=4, TM=2
+        <div style="margin-right:20px">
+            <strong>SGEMM 1D Tiling</strong> <span style="color:#777; font-size:0.9em">(TM=2)</span>
         </div>
-        <button onclick="prevStep()" id="btnPrev">Previous</button>
-        <button onclick="nextStep()" id="btnNext">Next Step</button>
-        <button onclick="reset()" id="btnReset">Reset</button>
-        <div style="margin-left: 20px;">Step: <span id="stepDisplay">0</span></div>
+        <button onclick="prevStep()" id="btnPrev">Prev</button>
+        <button onclick="nextStep()" id="btnNext">Next</button>
+        <button onclick="resetSim()">Reset</button>
+        <div style="margin-left:auto; font-size:14px; color:#888">
+            Step: <span id="stepDisp" style="color:white">0</span>
+        </div>
     </div>
 
-    <div class="layout-grid">
+    <div class="main-container">
         
         <div class="panel">
-            <div class="matrix-title">Global Memory (A & B)</div>
-            <div style="display: flex; gap: 20px; justify-content: center;">
+            <h3>Global Memory (A & B)</h3>
+            <div style="display: flex; gap: 20px;">
                 <div>
-                    <div style="text-align:center; font-size:12px; margin-bottom:5px;">Matrix A (8x8)</div>
-                    <div id="gridA" class="grid-container"></div>
+                    <div style="text-align:center; font-size:10px; margin-bottom:5px; color:var(--accent-a)">Matrix A (8x8)</div>
+                    <div id="gridA" class="grid" style="grid-template-columns: repeat(8, var(--cell-size));"></div>
                 </div>
                 <div>
-                    <div style="text-align:center; font-size:12px; margin-bottom:5px;">Matrix B (8x8)</div>
-                    <div id="gridB" class="grid-container"></div>
+                    <div style="text-align:center; font-size:10px; margin-bottom:5px; color:var(--accent-b)">Matrix B (8x8)</div>
+                    <div id="gridB" class="grid" style="grid-template-columns: repeat(8, var(--cell-size));"></div>
                 </div>
             </div>
-            <div style="margin-top: 20px; text-align: center;">
-                <div style="text-align:center; font-size:12px; margin-bottom:5px;">Matrix C (Block Result)</div>
-                <div id="gridC" class="grid-container"></div>
-            </div>
-        </div>
-
-        <div class="panel">
-            <div class="matrix-title">Inside Block (0,0) - Shared Mem & Registers</div>
             
-            <div style="display: flex; gap: 40px; justify-content: center; margin-bottom: 20px;">
+            <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">
+                <div style="text-align:center; font-size:10px; margin-bottom:5px; color:var(--accent-c)">Global C (Block Result 4x4)</div>
+                <div style="display:flex; justify-content:center;">
+                    <div id="gridC" class="grid" style="grid-template-columns: repeat(4, var(--cell-size));"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel" style="min-width: 300px;">
+            <h3>Block(0,0) Context</h3>
+            
+            <div style="display:flex; gap:15px; justify-content:center; align-items:flex-end;">
                 <div>
-                    <div style="font-size:12px; margin-bottom:5px; color:var(--matrix-a-color);">Shared Tile A (BMxBK)</div>
-                    <div id="smemA" class="grid-container"></div>
+                    <div style="text-align:center; font-size:10px; margin-bottom:2px; color:#aaa">Smem A (4x4)</div>
+                    <div id="smemA" class="grid" style="grid-template-columns: repeat(4, var(--cell-size));"></div>
                 </div>
                 <div>
-                    <div style="font-size:12px; margin-bottom:5px; color:var(--matrix-b-color);">Shared Tile B (BKxBN)</div>
-                    <div id="smemB" class="grid-container"></div>
+                    <div style="text-align:center; font-size:10px; margin-bottom:2px; color:#aaa">Smem B (4x4)</div>
+                    <div id="smemB" class="grid" style="grid-template-columns: repeat(4, var(--cell-size));"></div>
                 </div>
             </div>
 
-            <div style="border-top: 1px solid #444; padding-top: 15px;">
-                <div class="matrix-title">Thread Processing (Focus: Thread 0)</div>
-                <div style="font-size: 13px; line-height: 1.5; color: #ccc;">
-                    <strong>Logic:</strong><br>
-                    Thread 0 computes <span style="color:var(--highlight-color)">TM=2</span> elements.<br>
-                    <code>float thread_results[2];</code><br>
-                    Inner Loop: <code>thread_results[0] += A[row0]*B;</code><br>
-                    Inner Loop: <code>thread_results[1] += A[row1]*B;</code>
-                </div>
-                <div id="registerView" style="margin-top: 15px; display: flex; gap: 10px; justify-content: center;">
+            <div style="margin-top: 25px;">
+                <h3>Thread 0 Registers (TM=2)</h3>
+                <div style="font-size:12px; color:#888; margin-bottom:5px;">Processing C[0][0] and C[1][0]</div>
+                
+                <div class="reg-container">
+                    <div class="reg-row">
+                        <span>Reg[0] (Row 0):</span>
+                        <span id="reg0_val" class="reg-val">0.0</span>
                     </div>
+                    <div class="reg-row">
+                        <span>Reg[1] (Row 1):</span>
+                        <span id="reg1_val" class="reg-val">0.0</span>
+                    </div>
+                </div>
+
+                <div id="calc-display">Ready to start...</div>
             </div>
         </div>
-
-        <div class="info-box" id="infoText">
-            Click "Next Step" to start the visualization.
-        </div>
-
-    </div>
-
-    <div class="legend">
-        <div><span class="dot" style="background:var(--matrix-a-color)"></span>Loading A</div>
-        <div><span class="dot" style="background:var(--matrix-b-color)"></span>Loading B</div>
-        <div><span class="dot" style="background:var(--highlight-color)"></span>Active Thread Calculation</div>
     </div>
 
 <script>
-    // Configuration matching the user prompt roughly
-    // We visualize ONE BLOCK. Block Size: BM=4, BN=4. 
-    // Matrix Size: 8x8.
-    // Tile Size (K dimension): BK=4.
-    // Thread Tiling: TM=2.
-    // Threads per block = (BM * BN) / TM = (4*4)/2 = 8 threads.
+    // --- Config ---
+    const BM = 4, BN = 4, BK = 4, TM = 2;
+    const GLOBAL_K = 8;
     
-    const BM = 4;
-    const BN = 4;
-    const BK = 4;
-    const TM = 2;
-    const GLOBAL_K = 8; // Total width of A, height of B
-
+    // --- State ---
+    let steps = [];
     let currentStep = 0;
-    const steps = [];
+    
+    // Data Simulation
+    const matA = []; // 8x8 flat
+    const matB = []; // 8x8 flat
+    const matC = new Array(BM*BN).fill(0); // Result buffer for display
+    
+    // Thread 0 specific accumulator tracking
+    let t0_reg = [0, 0]; 
 
-    // Initialize Grids
-    function createGrid(id, rows, cols, className) {
-        const container = document.getElementById(id);
-        container.style.gridTemplateColumns = `repeat(${cols}, 25px)`;
-        container.innerHTML = '';
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                const div = document.createElement('div');
-                div.className = `cell ${className}`;
-                div.dataset.r = r;
-                div.dataset.c = c;
-                div.id = `${id}_${r}_${c}`;
-                div.textContent = ``; //(${r},${c})
-                container.appendChild(div);
+    // --- Initialization ---
+    function initData() {
+        // Fill A and B with random small ints (1-5) for easy mental math
+        for(let i=0; i<64; i++) matA[i] = Math.ceil(Math.random() * 5);
+        for(let i=0; i<64; i++) matB[i] = Math.ceil(Math.random() * 5);
+        t0_reg = [0, 0];
+    }
+
+    function createGrid(id, count, dataArray, className) {
+        const el = document.getElementById(id);
+        el.innerHTML = '';
+        for(let i=0; i<count; i++) {
+            const div = document.createElement('div');
+            div.className = `cell ${className}`;
+            div.id = `${id}_${i}`;
+            // If it's Global A or B, show initial data
+            if(dataArray && dataArray[i] !== undefined) {
+                div.textContent = dataArray[i];
+            } else {
+                div.textContent = '-';
             }
+            el.appendChild(div);
         }
     }
 
-    function init() {
-        createGrid('gridA', 8, 8, 'a-mem');
-        createGrid('gridB', 8, 8, 'b-mem');
-        createGrid('gridC', BM, BN, 'c-mem'); // Showing just the block result
-        createGrid('smemA', BM, BK, 'smem-a');
-        createGrid('smemB', BK, BN, 'smem-b');
-
-        // Draw Registers for Thread 0
-        const regDiv = document.getElementById('registerView');
-        regDiv.innerHTML = '';
-        for(let i=0; i<TM; i++) {
-            let d = document.createElement('div');
-            d.style.border = '1px solid #666';
-            d.style.padding = '5px 10px';
-            d.style.borderRadius = '4px';
-            d.innerHTML = `<small>Reg[${i}]</small><br><strong id="reg_val_${i}">0.0</strong>`;
-            regDiv.appendChild(d);
-        }
-
-        generateSteps();
-        updateView();
+    function renderBase() {
+        createGrid('gridA', 64, matA, 'val-a');
+        createGrid('gridB', 64, matB, 'val-b');
+        createGrid('gridC', 16, null, 'val-c'); // Block C is 4x4
+        createGrid('smemA', 16, null, 'val-a'); // 4x4
+        createGrid('smemB', 16, null, 'val-b'); // 4x4
+        
+        document.getElementById('reg0_val').textContent = "0.0";
+        document.getElementById('reg1_val').textContent = "0.0";
+        document.getElementById('calc-display').textContent = "Click Next to start";
     }
 
+    // --- Step Generation Logic ---
     function generateSteps() {
-        // Phase 1: Explanation
-        steps.push({
-            text: "Initial State. We are focusing on Block(0,0). BM=4, BN=4, TM=2. Threads per block = 8.",
-            highlights: []
-        });
+        steps = [];
+        
+        // Simulating the kernel execution flow
+        let threadRegs = [0, 0]; // Simulation for Thread 0
 
-        // Loop over K tiles
         for (let tileIdx = 0; tileIdx < GLOBAL_K; tileIdx += BK) {
             
-            // --- LOAD PHASE ---
+            // 1. Load Phase
             steps.push({
-                text: `<b>Load Phase (Tile K=${tileIdx}):</b> Threads cooperatively load A[0..3][${tileIdx}..${tileIdx+3}] and B[${tileIdx}..${tileIdx+3}][0..3] into Shared Memory.`,
-                action: 'load',
-                tileIdx: tileIdx
+                type: 'load',
+                tileIdx: tileIdx,
+                msg: `Load Tile K=[${tileIdx}..${tileIdx+3}] from Global to Shared`
             });
 
-            // --- COMPUTE PHASE ---
-            // Simulate dot product loop (dot_idx)
+            // 2. Compute Phase (Iterate over K inside tile)
             for (let dotIdx = 0; dotIdx < BK; dotIdx++) {
                 
-                // Focusing on Thread 0 for clarity.
-                // Thread 0 handles: Row 0 and Row 1 (since TM=2) at Column 0.
-                // It needs TileA[0][dotIdx], TileA[1][dotIdx] and TileB[dotIdx][0].
+                // We focus on Thread 0 (Row=0, Col=0)
+                // Thread 0 computes C[0][0] and C[1][0] (because TM=2)
                 
+                // The relevant values in Shared Mem for this dot step:
+                // B value: smemB[dotIdx][0] (Used by both TM steps)
+                // A val 0: smemA[0][dotIdx]
+                // A val 1: smemA[1][dotIdx]
+
+                // Mapping Global Coords to find actual data values for the visualizer
+                // Global B: Row = tileIdx + dotIdx, Col = 0
+                // Global A0: Row = 0, Col = tileIdx + dotIdx
+                // Global A1: Row = 1, Col = tileIdx + dotIdx
+                
+                const globalA_idx_0 = (0) * 8 + (tileIdx + dotIdx);
+                const globalA_idx_1 = (1) * 8 + (tileIdx + dotIdx);
+                const globalB_idx   = (tileIdx + dotIdx) * 8 + (0); // Thread col 0
+
+                const valA0 = matA[globalA_idx_0];
+                const valA1 = matA[globalA_idx_1];
+                const valB  = matB[globalB_idx];
+
+                // Step: Compute TM 0
+                threadRegs[0] += valA0 * valB;
                 steps.push({
-                    text: `<b>Compute Phase (k=${dotIdx}):</b> Thread 0 loads <code>B_val = TileB[${dotIdx}][0]</code>.`,
-                    action: 'compute_setup',
+                    type: 'compute',
+                    tm: 0,
                     dotIdx: dotIdx,
-                    threadCol: 0 // Thread 0's column
+                    valA: valA0,
+                    valB: valB,
+                    currentSum: threadRegs[0],
+                    smemA_idx: 0 * 4 + dotIdx,     // Row 0, Col dotIdx in Smem
+                    smemB_idx: dotIdx * 4 + 0,     // Row dotIdx, Col 0 in Smem
+                    msg: `Reg[0] += ${valA0} * ${valB}`
                 });
 
-                // TM Loop 0
+                // Step: Compute TM 1
+                threadRegs[1] += valA1 * valB;
                 steps.push({
-                    text: `<b>Compute (TM=0):</b> Thread 0 calculates <code>Reg[0] += TileA[0][${dotIdx}] * B_val</code>. (1D Tiling: Row 0)`,
-                    action: 'compute_tm',
+                    type: 'compute',
+                    tm: 1,
                     dotIdx: dotIdx,
-                    tmIdx: 0,
-                    threadRow: 0, // Thread 0 starts at row 0
-                    threadCol: 0
-                });
-
-                // TM Loop 1
-                steps.push({
-                    text: `<b>Compute (TM=1):</b> Thread 0 calculates <code>Reg[1] += TileA[1][${dotIdx}] * B_val</code>. (1D Tiling: Row 1)`,
-                    action: 'compute_tm',
-                    dotIdx: dotIdx,
-                    tmIdx: 1,
-                    threadRow: 0, 
-                    threadCol: 0
+                    valA: valA1,
+                    valB: valB,
+                    currentSum: threadRegs[1],
+                    smemA_idx: 1 * 4 + dotIdx,     // Row 1, Col dotIdx in Smem
+                    smemB_idx: dotIdx * 4 + 0,     // Re-use same B
+                    msg: `Reg[1] += ${valA1} * ${valB}`
                 });
             }
-            
-            steps.push({
-                text: `<b>Sync Threads:</b> Tile K=${tileIdx} complete. Shared memory barrier.`,
-                action: 'sync'
-            });
         }
 
-        // --- WRITE BACK ---
+        // 3. Writeback
         steps.push({
-            text: `<b>Write Back:</b> Thread 0 writes <code>Reg[0]</code> to C[0][0] and <code>Reg[1]</code> to C[1][0] in Global Memory.`,
-            action: 'write'
+            type: 'write',
+            finalRegs: [...threadRegs],
+            msg: "Write Registers to Global C"
         });
     }
 
-    function clearHighlights() {
-        document.querySelectorAll('.cell').forEach(el => {
-            el.className = el.className.replace(/active-load-a|active-load-b|highlight-compute-a|highlight-compute-b|thread-active|thread-result/g, '').trim();
-        });
-    }
-
+    // --- View Updates ---
     function updateView() {
-        clearHighlights();
+        // Reset Visuals
+        document.querySelectorAll('.cell').forEach(e => {
+            e.className = e.className.replace('active-a','').replace('active-b','').replace('active-c','');
+        });
+        
         const step = steps[currentStep];
-        document.getElementById('infoText').innerHTML = step.text;
-        document.getElementById('stepDisplay').textContent = `${currentStep + 1} / ${steps.length}`;
+        document.getElementById('stepDisp').textContent = `${currentStep+1}/${steps.length}`;
+        document.getElementById('calc-display').innerHTML = step.msg;
 
-        document.getElementById('btnPrev').disabled = currentStep === 0;
-        document.getElementById('btnNext').disabled = currentStep === steps.length - 1;
-
-        if (step.action === 'load') {
-            // Highlight Global A region
+        // Logic based on step type
+        if(step.type === 'load') {
+            // Visualize loading into Smem (Copying data)
+            const tileStart = step.tileIdx;
+            
+            // Fill Smem Visuals with actual data
             for(let r=0; r<BM; r++) {
                 for(let c=0; c<BK; c++) {
-                    const elA = document.getElementById(`gridA_${r}_${step.tileIdx + c}`);
-                    if(elA) elA.classList.add('active-load-a');
-                    
-                    const smemA = document.getElementById(`smemA_${r}_${c}`);
-                    if(smemA) smemA.textContent = `A`;
+                    const globalVal = matA[r*8 + (tileStart+c)];
+                    const smemEl = document.getElementById(`smemA_${r*4+c}`);
+                    smemEl.textContent = globalVal;
+                    // Highlight source in Global
+                    document.getElementById(`gridA_${r*8+(tileStart+c)}`).classList.add('active-a');
                 }
             }
-            // Highlight Global B region
             for(let r=0; r<BK; r++) {
                 for(let c=0; c<BN; c++) {
-                    const elB = document.getElementById(`gridB_${step.tileIdx + r}_${c}`);
-                    if(elB) elB.classList.add('active-load-b');
-
-                    const smemB = document.getElementById(`smemB_${r}_${c}`);
-                    if(smemB) smemB.textContent = `B`;
+                    const globalVal = matB[(tileStart+r)*8 + c];
+                    const smemEl = document.getElementById(`smemB_${r*4+c}`);
+                    smemEl.textContent = globalVal;
+                    // Highlight source in Global
+                    document.getElementById(`gridB_${(tileStart+r)*8+c}`).classList.add('active-b');
                 }
             }
+        } 
+        else if (step.type === 'compute') {
+            // Highlight Smem Cells
+            document.getElementById(`smemA_${step.smemA_idx}`).classList.add('active-a');
+            document.getElementById(`smemB_${step.smemB_idx}`).classList.add('active-b');
+
+            // Detailed Math display
+            const mathHTML = `
+                <span style="color:#888">Calculation:</span><br>
+                ${step.valA} <span style="font-size:0.8em">x</span> ${step.valB} = ${step.valA*step.valB}
+                <br>
+                Accum => <span class="math-highlight">${step.currentSum}</span>
+            `;
+            document.getElementById('calc-display').innerHTML = mathHTML;
+
+            // Update Register DOM
+            const regId = step.tm === 0 ? 'reg0_val' : 'reg1_val';
+            const regEl = document.getElementById(regId);
+            regEl.textContent = step.currentSum;
+            regEl.style.color = '#f1c40f'; // Flash yellow
+            setTimeout(() => regEl.style.color = 'var(--accent-c)', 300);
+        }
+        else if (step.type === 'write') {
+            // Highlight C
+            const c0 = document.getElementById('gridC_0'); // Row 0, Col 0
+            const c1 = document.getElementById('gridC_4'); // Row 1, Col 0 (Index = 1*4 + 0 = 4)
+            
+            c0.textContent = step.finalRegs[0];
+            c1.textContent = step.finalRegs[1];
+            
+            c0.classList.add('active-c');
+            c1.classList.add('active-c');
         }
 
-        if (step.action === 'compute_setup') {
-            // Highlight Tile B Value
-            const bEl = document.getElementById(`smemB_${step.dotIdx}_${step.threadCol}`);
-            if(bEl) bEl.classList.add('highlight-compute-b');
-        }
-
-        if (step.action === 'compute_tm') {
-            // Keep B highlighted
-            const bEl = document.getElementById(`smemB_${step.dotIdx}_${step.threadCol}`);
-            if(bEl) bEl.classList.add('highlight-compute-b');
-
-            // Highlight A Value (Row depends on TM index)
-            // thread_row * TM + res_idx
-            const actualRow = step.threadRow * TM + step.tmIdx; 
-            const aEl = document.getElementById(`smemA_${actualRow}_${step.dotIdx}`);
-            if(aEl) aEl.classList.add('highlight-compute-a');
-
-            // Simulate Register Update
-            const regEl = document.getElementById(`reg_val_${step.tmIdx}`);
-            regEl.style.color = '#f5a623';
-            regEl.textContent = "Accum...";
-            setTimeout(() => regEl.style.color = 'white', 300);
-        }
-
-        if (step.action === 'write') {
-             // Highlight C Result (Thread 0 owns 2 cells)
-             // Row 0, Col 0 AND Row 1, Col 0
-             document.getElementById(`gridC_0_0`).classList.add('thread-active');
-             document.getElementById(`gridC_0_0`).textContent = 'Res0';
-             document.getElementById(`gridC_1_0`).classList.add('thread-active');
-             document.getElementById(`gridC_1_0`).textContent = 'Res1';
-        }
+        // Button states
+        document.getElementById('btnPrev').disabled = currentStep === 0;
+        document.getElementById('btnNext').disabled = currentStep === steps.length - 1;
     }
 
     function nextStep() {
-        if (currentStep < steps.length - 1) {
+        if(currentStep < steps.length-1) {
             currentStep++;
             updateView();
         }
     }
 
     function prevStep() {
-        if (currentStep > 0) {
+        if(currentStep > 0) {
             currentStep--;
             updateView();
         }
     }
 
-    function reset() {
+    function resetSim() {
         currentStep = 0;
-        init();
+        initData();
+        renderBase();
+        generateSteps();
+        updateView();
     }
 
     // Start
-    init();
+    initData();
+    renderBase();
+    generateSteps();
+    // Don't auto-run updateView on load so "Reset" state is cleaner, 
+    // but here we want to show initial text.
+    document.getElementById('calc-display').textContent = "Ready. Data Randomized. Click Next.";
 
 </script>
 </body>
